@@ -35,16 +35,9 @@ def init_db():
     return MongoDBHandler()
 
 # =========================
-# Lightweight Pre-Router (تحسين توكنز)
+# Lightweight Pre-Router 
 # =========================
-# قبل استدعاء agent.run_sync (اللي معاه الـ system prompt الكامل + تعريف
-# الأدوات + جولتين LLM على الأقل) بنفحص أول لو الرسالة "تحية/كلام عابر" بسيط
-# مالوش أي علاقة بكورسات أو أسعار أو نية شراء. في هذه الحالة بس بنرد برسالة
-# ثابتة بدون أي استدعاء للموديل خالص - توفير 100% من توكنز هذه الرسالة
-# (كانت تكلف ~1,500+ توكن في الـ turn الأول بس لمجرد قول "صباح الخير").
-# لو الرسالة فيها أي إشارة لكورس/سعر/تسجيل/مشكلة فعلية، بترجع None فوراً
-# والتدفق الطبيعي (agent.run_sync) بيشتغل عادي - فالفلتر دايماً "متحفظ" ولا
-# بيرفض أبداً سؤال حقيقي.
+
 _SMALL_TALK_PATTERNS = [
     r"^\s*(hi|hello|hey|good\s*(morning|evening|afternoon))\s*[!.]*\s*$",
     r"^\s*(السلام عليكم|سلام عليكم|أهلا|اهلا|أهلاً|مرحبا|صباح الخير|مساء الخير|هاي|هلا)\s*[!.،]*\s*$",
@@ -107,7 +100,7 @@ def require_login():
             required_pw = os.getenv("APP_PASSWORD", "kayfa_admin")
             if email == required_email and pw == required_pw:
                 
-                # ------ هنا بنجرب نكلم مونجو ونشوف هيقول إيه ------
+               
                 try:
                     from database.mongodb import MongoDBHandler
                     _db = MongoDBHandler()
@@ -137,7 +130,6 @@ def main():
         st.image("kayfa_logo.png", use_container_width=True)
         st.title("مرحباً بك في كيف")
         
-        # قائمة تنقل عربية صممناها بإيدينا
         st.markdown("<br><b>القائمة الرئيسية:</b>", unsafe_allow_html=True)
         st.page_link("app.py", label="مساعد المبيعات", icon="💬")
         st.page_link("pages/crm.py", label="دخول الإدارة", icon="🔐")
@@ -180,9 +172,7 @@ def main():
 
         small_talk_reply = route_small_talk(prompt)
         if small_talk_reply is not None:
-            # رد فوري بدون أي استدعاء لـ agent.run_sync - صفر توكنز API لهذه
-            # الرسالة. ملحوظة: لا نضيفها لـ pydantic_messages (تاريخ الوكيل)
-            # لأنها مفيش فيها سياق فعلي يحتاج الوكيل يتذكره في الردود الجاية.
+        
             with st.chat_message("assistant", avatar="🎓"):
                 render_bubble(small_talk_reply)
             st.session_state.messages.append({"sender": "assistant", "text": small_talk_reply})
@@ -212,18 +202,13 @@ def main():
                         break
 
                     except UsageLimitExceeded:
-                        # حد أقصى داخلي وضعناه نحن (وليس خطأ من Google) لمنع رسالة واحدة
-                        # من استهلاك عدد كبير من الطلبات في حلقة استدلال طويلة. لا فائدة
-                        # من إعادة المحاولة فوراً لأن السبب منطقي وليس عرضي.
+                     
                         status.empty()
                         st.warning("السؤال احتاج تفكيراً أعمق من المتوقع. ممكن تبسّط سؤالك أو تجزّئه لخطوتين؟")
                         break
 
                     except ModelHTTPError as e:
-                        # رسالة 429 معناها "تجاوزت العدد المسموح بالدقيقة" عند مزوّد
-                        # النموذج (Groq أو غيره) — إعادة المحاولة فوراً بعد ثواني قليلة
-                        # عادةً لا تنجح لأن نافذة الحصة قد تكون دقيقة كاملة، فننتظر
-                        # بفترة متصاعدة (backoff) ونعطي رسالة واضحة بدل التكرار بلا فائدة.
+                 
                         is_rate_limit = getattr(e, "status_code", None) == 429 or "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
 
                         if attempt < max_attempts:
