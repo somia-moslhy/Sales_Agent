@@ -3,9 +3,11 @@ import re
 import uuid
 import time
 from typing import Optional
+
 import streamlit as st
 from dotenv import load_dotenv
 
+from utils.styles import inject_css, render_sidebar, LOGO_SRC, BOT_SRC
 from core.loader import DataLoader
 from core.rag import KayfaRAG
 from core.agent import agent, AgentDeps, KAYFA_TURN_USAGE_LIMITS
@@ -14,220 +16,276 @@ from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 
 load_dotenv()
 
-def render_bubble(text: str):
-    """
-    يعرض رسالة الشات مع اتجاه نص صريح:
-    - rtl + محاذاة لليمين لو النص فيه حروف عربية (يدعم السوري/السعودي/المصري لأنها نفس الحروف).
-    - ltr + محاذاة لليسار للإنجليزي.
-    لازم اتجاه صريح هنا (مش direction:auto) لأن auto ممكن يعطي نتيجة غلط
-    لما تتقابل في نفس الرسالة كلمات إنجليزية زي SOC أو Python وسط جملة عربية.
-    """
-    has_arabic = bool(re.search(r'[\u0600-\u06FF]', text or ""))
-    direction = "rtl" if has_arabic else "ltr"
-    align = "right" if has_arabic else "left"
-    st.markdown(
-        f"<div style='direction:{direction}; text-align:{align};'>{text}</div>",
-        unsafe_allow_html=True,
-    )
+# ── Page config ───────────────────────────────────────────────
+st.set_page_config(
+    page_title="Kayfa AI Sales Agent",
+    page_icon=LOGO_SRC or "🤖",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+inject_css()   
 
+
+# ── Cached resources ──────────────────────────────────────────
 @st.cache_resource
 def init_db():
     return MongoDBHandler()
 
-# =========================
-# Lightweight Pre-Router 
-# =========================
-
-_SMALL_TALK_PATTERNS = [
-    r"^\s*(hi|hello|hey|good\s*(morning|evening|afternoon))\s*[!.]*\s*$",
-    r"^\s*(السلام عليكم|سلام عليكم|أهلا|اهلا|أهلاً|مرحبا|صباح الخير|مساء الخير|هاي|هلا)\s*[!.،]*\s*$",
-    r"^\s*(thanks|thank you|thx)\s*[!.]*\s*$",
-    r"^\s*(شكرا|شكراً|تمام|تمم|اوكي|أوكي|ok|okay)\s*[!.،]*\s*$",
-]
-_SMALL_TALK_REPLY_AR = "أهلاً بيك في كيف! 👋 قولي بس عاوز تتعلم في إيه أو أي مجال يهمك (ذكاء اصطناعي، داتا، أمن سيبراني...) وأنا أرشحلك المسار الأنسب."
-_SMALL_TALK_REPLY_EN = "Welcome to Kayfa! 👋 Tell me what you're interested in learning (AI, Data, Cybersecurity, etc.) and I'll point you to the right track."
-
-def route_small_talk(text: str) -> Optional[str]:
-    """يرجع رد ثابت فوري لو الرسالة كلام عابر بحت، أو None لو محتاجة الوكيل الفعلي."""
-    stripped = (text or "").strip()
-    if not stripped or len(stripped) > 40:
-        return None
-    for pattern in _SMALL_TALK_PATTERNS:
-        if re.match(pattern, stripped, flags=re.IGNORECASE):
-            has_arabic = bool(re.search(r"[\u0600-\u06FF]", stripped))
-            return _SMALL_TALK_REPLY_AR if has_arabic else _SMALL_TALK_REPLY_EN
-    return None
-
-
 @st.cache_resource
-def init_system(_db_handler):
-    loader = DataLoader()
-    docs = loader.load_text()
+def init_system(_db):
+    loader  = DataLoader()
+    docs    = loader.load_text()
     courses = loader.load_json()
-    rag = KayfaRAG(docs)
+    rag     = KayfaRAG(docs)
     rag.load_database()
-    
-    deps = AgentDeps(rag=rag, courses=courses, db_handler=_db_handler)
-    return deps
+    return AgentDeps(rag=rag, courses=courses, db_handler=_db)
 
-st.set_page_config(page_title="مساعد مبيعات كيف", page_icon="🤖", layout="wide")
 
-st.markdown("""
-<style>
-    .rtl-text { direction: rtl; text-align: right; font-family: sans-serif; }
-    .stChatMessage { direction: rtl; text-align: right; font-family: sans-serif; }
-    /* السطر ده بيخفي قائمة Streamlit الإجبارية اللي مكتوب فيها app و crm */
-    [data-testid="stSidebarNav"] {display: none;}
-</style>
-""", unsafe_allow_html=True)
-
-def require_login():
+# ── Auth — any email + "123"; admin gets role="admin" ────────
+def require_login() -> bool:
     if st.session_state.get("global_authenticated"):
         return True
 
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.image("kayfa_logo.png", use_container_width=True)
-    st.markdown("<h2 class='rtl-text'>🔐 الدخول إلى مساعد مبيعات كيف</h2>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        st.markdown("<p style='margin-bottom:2px;'>Email</p>", unsafe_allow_html=True)
-        email = st.text_input("Email", key="chat_login_email", label_visibility="collapsed")
-        st.markdown("<p style='margin-bottom:2px;'>Password</p>", unsafe_allow_html=True)
-        pw = st.text_input("Password", type="password", key="chat_login_pw", label_visibility="collapsed")
-        if st.button("دخول", use_container_width=True):
-            required_email = os.getenv("APP_EMAIL", "admin@kayfa.com")
-            required_pw = os.getenv("APP_PASSWORD", "kayfa_admin")
-            if email == required_email and pw == required_pw:
-                
-               
-                try:
-                    from database.mongodb import MongoDBHandler
-                    _db = MongoDBHandler()
-                    _db.log_login(email)
-                except Exception as e:
-                    st.error(f"⚠️ خطأ اتصال بمونجو أثناء اللوجين: {e}")
-                # --------------------------------------------------
+    # وسعنا المساحة في النص عشان اللوجو يكبر
+    _, col, _ = st.columns([1, 1.5, 1])
+    with col:
+        if LOGO_SRC:
+            st.markdown(
+                f'<div style="text-align:center;margin-bottom:15px;">'
+                f'<img src="{LOGO_SRC}" style="width:180px;border-radius:20px;box-shadow: 0 4px 12px rgba(0,0,0,0.5);"></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            
+            "<h1 style='text-align:center;color:#fff;margin-bottom:35px;font-weight:900;font-size:2.8rem;'>"
+            "Kayfa AI Sales Agent</h1>",
+            unsafe_allow_html=True,
+        )
 
+        email = st.text_input("Email", key="li_email",
+                               label_visibility="collapsed",
+                               placeholder="you@example.com")
+
+        pw = st.text_input("Password", type="password", key="li_pw",
+                            label_visibility="collapsed", placeholder="••••••••")
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        if st.button("Sign In", use_container_width=True, key="signin_btn"):
+            admin_email = os.getenv("APP_EMAIL", "admin@kayfa.com")
+            admin_pw    = os.getenv("APP_PASSWORD", "123")
+            valid = (pw == "123") or (email == admin_email and pw == admin_pw)
+
+            if not email:
+                st.error("Please enter your email.")
+            elif valid:
+                role = "admin" if email == admin_email else "user"
                 st.session_state["global_authenticated"] = True
+                st.session_state["role"]       = role
                 st.session_state["user_email"] = email
-                st.rerun()
+                try:
+                    MongoDBHandler().log_login(email)
+                except Exception:
+                    pass
+                
+                # 🚀 الحل السحري للأدمن: التحويل يحصل هنا مرة واحدة بس!
+                if role == "admin":
+                    st.switch_page("pages/crm.py")
+                else:
+                    st.rerun()
             else:
-                st.error("Email أو Password غير صحيح.")
+                st.error("Incorrect password.")
     return False
 
+
+# ── Bubble HTML ───────────────────────────────────────────────
+def _bubble(text: str, role: str) -> str:
+    rtl     = bool(re.search(r'[\u0600-\u06FF]', text or ""))
+    dir_cls = "rtl" if rtl else "ltr"
+    bub_cls = "ab" if role == "agent" else "ub"
+    row_cls = "agent" if role == "agent" else "user"
+    safe    = (text or "").replace("&","&amp;").replace("<","&lt;") \
+                          .replace(">","&gt;").replace("\n","<br>")
+
+    av = (f'<div class="av"><img src="{BOT_SRC}" alt="Kayfa"></div>'
+          if BOT_SRC else '<div class="av" style="background:#1e3a5f;">🎓</div>') if role == "agent" else '<div class="av uav">👤</div>'
+
+    return (f'<div class="brow {row_cls}">'
+            f'{av}<div class="bbl {bub_cls} {dir_cls}">{safe}</div>'
+            f'</div>')
+
+
+# ── Small-talk ──────────────────────────────────────
+_PAT = [
+    r"^\s*(hi|hello|hey|good\s*(morning|evening|afternoon))\s*[!.]*\s*$",
+    r"^\s*(السلام عليكم|سلام|أهلا|اهلا|مرحبا|صباح الخير|مساء الخير|هاي|هلا)\s*[!.،]*\s*$",
+    r"^\s*(thanks|thank you|thx|شكرا|شكراً|تمام|اوكي|ok|okay)\s*[!.،]*\s*$",
+]
+_AR = "أهلاً بيك في كيف! 👋 قولي بس عاوز تتعلم في إيه وأنا أرشحلك المسار الأنسب."
+_EN = "Welcome to Kayfa! 👋 Tell me what you'd like to learn and I'll point you to the right track."
+
+def _small_talk(text: str) -> Optional[str]:
+    s = (text or "").strip()
+    if not s or len(s) > 50:
+        return None
+    for p in _PAT:
+        if re.match(p, s, re.IGNORECASE):
+            return _AR if re.search(r'[\u0600-\u06FF]', s) else _EN
+    return None
+
+
+# ── Agent call ────────────────────────────────────────────────
+def _run_agent(prompt: str, deps, sid: str) -> str:
+    for attempt in range(1, 4):
+        try:
+            result = agent.run_sync(
+                prompt,
+                deps=deps,
+                message_history=st.session_state.get("pydantic_messages", []),
+                usage_limits=KAYFA_TURN_USAGE_LIMITS,
+            )
+            st.session_state["pydantic_messages"] = result.all_messages()
+            return result.output
+        except UsageLimitExceeded:
+            return "السؤال احتاج تفكيراً أعمق. ممكن تبسّط سؤالك؟"
+        except ModelHTTPError as e:
+            is_rate = (getattr(e, "status_code", None) == 429 or "429" in str(e))
+            if attempt < 3:
+                time.sleep(20 * attempt if is_rate else 4 * attempt)
+            else:
+                return "السيرفر مشغول، يرجى المحاولة لاحقاً."
+        except Exception as e:
+            return f"عفواً، لم أتمكن من معالجة طلبك: {e}"
+
+
+# ── Right panel ───────────────────────────────────────────────
+def _right_panel(sid: str):
+    st.markdown("""
+    <div class="panel-card">
+        <div class="panel-title">📚 Knowledge Base & Analytics</div>
+        <div class="metric-row">
+            <span class="metric-label">المقررات والدروس التدريبية</span>
+            <span class="metric-val">52</span>
+        </div>
+        <div class="metric-row">
+            <span class="metric-label">مسارات وخطوات تعليمية</span>
+            <span class="metric-val">13</span>
+        </div>
+        <div class="metric-row">
+            <span class="metric-label">فروع متخصصة</span>
+            <span class="metric-val">3</span>
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+    if st.button("🔄 New Chat", use_container_width=True, key="nc"):
+        st.session_state.pop("messages", None)
+        st.session_state.pop("pydantic_messages", None)
+        st.session_state["session_id"] = str(uuid.uuid4())
+        st.rerun()
+
+
+# ── Quick replies ─────────────────────────────────────────────
+QUICK = [
+    "← ما هي دبلومة الأمن السيبراني الشاملة وتفاصيلها؟ 🛡️",
+    "← بكم سعر كورس الذكاء الاصطناعي وبوت كامب الـ 5 شهور؟ 🧠",
+    "← ما هي شروط وسياسة استرجاع الأموال لديكم؟ 💵",
+    "← ابحث لي عن كورسات يعلمها أسامة سالم مدير إيتيكا للتكنولوجيا. 👤",
+]
+
+def _quick_replies():
+    if st.session_state.get("messages"):   
+        return
+    c1, c2 = st.columns(2)
+    for i, q in enumerate(QUICK):
+        with (c1 if i % 2 == 0 else c2):
+            if st.button(q, key=f"qr{i}", use_container_width=True):
+                st.session_state["qr_pick"] = q
+
+
+# ── Main ──────────────────────────────────────────────────────
 def main():
     if not require_login():
         st.stop()
-
-    db_handler = init_db()
-    deps = init_system(db_handler)
+   
+    db   = init_db()
+    deps = init_system(db)
 
     if "session_id" not in st.session_state:
         st.session_state["session_id"] = str(uuid.uuid4())
+    sid = st.session_state["session_id"]
 
-    with st.sidebar:
-        st.image("kayfa_logo.png", use_container_width=True)
-        st.title("مرحباً بك في كيف")
+    render_sidebar(active="chat")   
+
+    left, right = st.columns([2.7, 1], gap="large")
+
+    # ── LEFT ──────────────────────────────────────────────────
+    with left:
+        logo_tag = f'<img src="{LOGO_SRC}" alt="logo">' if LOGO_SRC else ""
+        st.markdown(
+            f'<div class="kayfa-header">{logo_tag}'
+            f'<span class="hdr-title">AI Sales Agent</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        if "messages" not in st.session_state:
+            st.session_state["messages"]          = db.get_chat_history(sid)
+            st.session_state["pydantic_messages"] = []
+
+        msgs = st.session_state["messages"]
+
+        if not msgs:
+            st.markdown("""
+            <div class="welcome-banner">
+                <h2>Welcome to Kayfa's Intelligent Sales Agent!</h2>
+                <p>اسألني عن أي كورس، مسار، أو دبلومة وسأرشدك للخيار الأنسب</p>
+            </div>""", unsafe_allow_html=True)
+
+        # حاوية الشات الثابتة (Chat Container) - هذا هو حل الرسايل الطايرة
+        chat_container = st.container()
         
-        st.markdown("<br><b>القائمة الرئيسية:</b>", unsafe_allow_html=True)
-        st.page_link("app.py", label="مساعد المبيعات", icon="💬")
-        st.page_link("pages/crm.py", label="دخول الإدارة", icon="🔐")
+        with chat_container:
+            st.markdown('<div class="chat-wrap">', unsafe_allow_html=True)
+            for m in msgs:
+                role = "agent" if m.get("sender") == "assistant" else "user"
+                st.markdown(_bubble(m.get("text", ""), role), unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        _quick_replies()
+
+        # Chat Input
+        prompt = (st.chat_input("...اكتب استفسارك هنا") or st.session_state.pop("qr_pick", None))
         
-        st.divider()
-        
-        if st.button("بدء محادثة جديدة 🔄", use_container_width=True):
-            st.session_state["session_id"] = str(uuid.uuid4())
-            st.session_state.messages = []
-            st.session_state.pydantic_messages = []
+        if prompt:
+            # 1. إضافة رسالة اليوزر
+            msgs.append({"sender": "user", "text": prompt})
+            try:
+                db.save_chat_turn(sid, "user", prompt)
+            except: pass
+
+            # 2. عرضها فورا في نفس الحاوية (فوق صندوق الإدخال)
+            with chat_container:
+                st.markdown(_bubble(prompt, "user"), unsafe_allow_html=True)
+
+                reply = _small_talk(prompt)
+                if not reply:
+                    with st.spinner("جاري التفكير…"):
+                        reply = _run_agent(prompt, deps, sid)
+
+                if reply:
+                    st.markdown(_bubble(reply, "agent"), unsafe_allow_html=True)
+
+            # 3. حفظ الرد وتحديث الشاشة
+            if reply:
+                msgs.append({"sender": "assistant", "text": reply})
+                try:
+                    db.save_chat_turn(sid, "assistant", reply)
+                except: pass
+            
             st.rerun()
 
-
-    st.markdown("<h2 class='rtl-text'>🤖 مستشار المبيعات التفاعلي لـ كيف</h2>", unsafe_allow_html=True)
-    st.divider()
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = db_handler.get_chat_history(st.session_state.session_id)
-        st.session_state.pydantic_messages = []
-
-    for msg in st.session_state.messages:
-        sender = msg.get("sender", "assistant")
-        text = msg.get("text", "")
-        role = "user" if sender == "user" else "assistant"
-        emoji = "👤" if role == "user" else "🎓"
-        with st.chat_message(role, avatar=emoji):
-            render_bubble(text)
-
-    if prompt := st.chat_input("اكتب استفسارك هنا..."):
-        sid = st.session_state.session_id
-        
-        with st.chat_message("user", avatar="👤"):
-            render_bubble(prompt)
-            
-        st.session_state.messages.append({"sender": "user", "text": prompt})
-        try:
-            db_handler.save_chat_turn(sid, "user", prompt)
-        except Exception as e:
-            st.error(f"⚠️ خطأ أثناء حفظ المحادثة: {e}")
-
-        small_talk_reply = route_small_talk(prompt)
-        if small_talk_reply is not None:
-        
-            with st.chat_message("assistant", avatar="🎓"):
-                render_bubble(small_talk_reply)
-            st.session_state.messages.append({"sender": "assistant", "text": small_talk_reply})
-            db_handler.save_chat_turn(sid, "assistant", small_talk_reply)
-        else:
-            with st.chat_message("assistant", avatar="🎓"):
-                status = st.empty()
-                status.info("جاري التفكير...")
-
-                max_attempts = 3
-                for attempt in range(1, max_attempts + 1):
-                    try:
-                        result = agent.run_sync(
-                            prompt,
-                            deps=deps,
-                            message_history=st.session_state.pydantic_messages,
-                            usage_limits=KAYFA_TURN_USAGE_LIMITS
-                        )
-
-                        response = result.output
-                        st.session_state.pydantic_messages = result.all_messages()
-
-                        status.empty()
-                        render_bubble(response)
-                        st.session_state.messages.append({"sender": "assistant", "text": response})
-                        db_handler.save_chat_turn(sid, "assistant", response)
-                        break
-
-                    except UsageLimitExceeded:
-                     
-                        status.empty()
-                        st.warning("السؤال احتاج تفكيراً أعمق من المتوقع. ممكن تبسّط سؤالك أو تجزّئه لخطوتين؟")
-                        break
-
-                    except ModelHTTPError as e:
-                 
-                        is_rate_limit = getattr(e, "status_code", None) == 429 or "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
-
-                        if attempt < max_attempts:
-                            wait_seconds = 20 * attempt if is_rate_limit else 4 * attempt
-                            status.warning(
-                                f"تم الوصول للحد الأقصى من الطلبات مؤقتاً، جاري إعادة المحاولة بعد {wait_seconds} ثانية..."
-                                if is_rate_limit else "ضغط على السيرفر، جاري إعادة المحاولة..."
-                            )
-                            time.sleep(wait_seconds)
-                        else:
-                            status.empty()
-                            if is_rate_limit:
-                                st.error("تم الوصول للحد الأقصى من الطلبات المسموح بها حالياً (Rate Limit). جرّب بعد دقيقة من فضلك 🙏")
-                            else:
-                                st.error("السيرفر مشغول حالياً، يرجى المحاولة لاحقاً.")
-                    except Exception as e:
-                        status.empty()
-                        st.error(f"خطأ: {e}")
-                        break
+    # ── RIGHT ─────────────────────────────────────────────────
+    with right:
+        _right_panel(sid)
 
 if __name__ == "__main__":
     main()

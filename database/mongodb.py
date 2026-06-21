@@ -1,4 +1,5 @@
 import os
+import certifi
 from datetime import datetime, timezone
 from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ConnectionFailure
@@ -13,7 +14,14 @@ class MongoDBHandler:
             raise ValueError("MONGODB_URI is missing in the .env file")
 
         try:
-            self.client = MongoClient(self.uri)
+            self.client = MongoClient(
+                self.uri,
+                tls=True,
+                tlsCAFile=certifi.where(),
+                serverSelectionTimeoutMS=20000,
+                connectTimeoutMS=20000,
+                socketTimeoutMS=20000,
+            )
             self.client.admin.command('ping')
         except ConnectionFailure as e:
             raise Exception(f"Failed to connect to MongoDB: {e}")
@@ -23,7 +31,7 @@ class MongoDBHandler:
         self.access_logs = self.db["access_logs"]
         self.messages = self.db["messages"]
 
-        # Index لتسريع البحث
+        # Index for faster search
         self.messages.create_index([("session_id", ASCENDING), ("timestamp", ASCENDING)])
 
     # =========================
@@ -36,7 +44,7 @@ class MongoDBHandler:
         return str(result.inserted_id)
 
     def get_all_leads(self) -> list:
-        """يستخدمها الـ CRM لعرض كل التذاكر"""
+        """Used by CRM to display all tickets"""
         leads_list = list(self.leads.find().sort("timestamp", -1))
         for lead in leads_list:
             lead["_id"] = str(lead["_id"])
@@ -56,7 +64,7 @@ class MongoDBHandler:
     # Chat History
     # =========================
     def save_chat_turn(self, session_id: str, sender: str, text: str) -> dict:
-        """يستخدمها الـ App لحفظ رسالة جديدة"""
+        """Used by App to save a new message"""
         message_doc = {
             "session_id": session_id,
             "sender": sender,
@@ -67,8 +75,19 @@ class MongoDBHandler:
         return message_doc
 
     def get_chat_history(self, session_id: str) -> list:
-        """يستخدمها الـ App لتحميل المحادثة القديمة"""
+        """Used by App to load old conversation"""
         chat_turns = list(self.messages.find({"session_id": session_id}).sort("timestamp", ASCENDING))
         for turn in chat_turns:
             turn["_id"] = str(turn["_id"])
         return chat_turns
+
+    # =========================
+    # Update Ticket (CRM Edit)
+    # =========================
+    def update_ticket(self, doc_id, updates: dict) -> None:
+        """Updates an existing ticket fields by its _id."""
+        from bson import ObjectId
+        # Remove empty keys so we don't overwrite existing data with blanks
+        clean = {k: v for k, v in updates.items() if v != "" and v is not None}
+        if clean:
+            self.leads.update_one({"_id": ObjectId(str(doc_id))}, {"$set": clean})

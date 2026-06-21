@@ -1,147 +1,236 @@
 import os
-import time
+from pathlib import Path
+
 import streamlit as st
 from dotenv import load_dotenv
 from database.mongodb import MongoDBHandler
 
+# ── import shared styles (CSS + logo + sidebar) ───────────────
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.styles import inject_css, render_sidebar, LOGO_SRC
+
 load_dotenv()
 
+# ── Page config ───────────────────────────────────────────────
+st.set_page_config(
+    page_title="Kayfa CRM Dashboard",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+inject_css()   # ← exact same CSS as app.py
+
+
+# ── DB ────────────────────────────────────────────────────────
 @st.cache_resource
 def init_db():
     return MongoDBHandler()
 
-st.set_page_config(page_title="لوحة إدارة كيف", page_icon="📊", layout="wide")
+db = init_db()
 
-st.markdown("""
-<style>
-    .rtl-text { direction: rtl; text-align: right; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    .main-header { text-align: center; padding: 2rem; background: linear-gradient(90deg, #1e293b 0%, #334155 100%); color: white; border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    div[data-testid="stMetric"] { background-color: #ffffff; padding: 15px 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; border-right: 4px solid #3b82f6; direction: rtl; }
-    div[data-testid="stMetricValue"] { font-size: 2rem !important; color: #0f172a; }
-    .badge-hot { background-color: #fee2e2; color: #ef4444; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; }
-    .badge-warm { background-color: #fef3c7; color: #d97706; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; }
-    .badge-cold { background-color: #e0f2fe; color: #0284c7; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; }
-    /* إخفاء القائمة الإجبارية هنا كمان */
-    [data-testid="stSidebarNav"] {display: none;}
-</style>
-""", unsafe_allow_html=True)
 
-db_handler = init_db()
-
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
+# ── Auth guard: MUST be logged in + admin role ────────────────
+# session_state is shared across pages in the same browser session,
+# so if the user logged in on app.py the keys are already present here.
 if not st.session_state.get("global_authenticated"):
-    st.markdown("<div class='main-header'><h1>بوابة الإدارة — كيف CRM 🔐</h1></div>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    with col2:
-        st.image("kayfa_logo.png", use_container_width=True)
-        st.subheader("سجل دخولك للوصول إلى بيانات العملاء")
-        email = st.text_input("البريد الإلكتروني", placeholder="admin@kayfa.io")
-        password = st.text_input("كلمة المرور", type="password")
-        
-        if st.button("تسجيل الدخول", use_container_width=True):
-            required_pw = os.getenv("APP_PASSWORD", "kayfa_admin")
-            required_email = os.getenv("APP_EMAIL", "admin@kayfa.com")
-            if password == required_pw and email == required_email:
-                try:
-                    db_handler.log_login(email)
-                except:
-                    pass
-                st.session_state["global_authenticated"] = True
-                st.session_state["user_email"] = email
-                st.success("تم تسجيل الدخول بنجاح!")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("البريد الإلكتروني أو كلمة المرور غير صحيحة.")
+    st.warning("يرجى تسجيل الدخول أولاً من الصفحة الرئيسية.")
+    st.page_link("app.py", label="→ الذهاب لصفحة الدخول", icon="🔐")
     st.stop()
 
-with st.sidebar:
-    st.image("kayfa_logo.png", use_container_width=True)
-    st.title("إدارة كيف")
-    st.write(f"المستخدم: **{st.session_state['user_email']}**")
-    
-    st.markdown("<br><b>القائمة الرئيسية:</b>", unsafe_allow_html=True)
-    st.page_link("app.py", label="مساعد المبيعات", icon="💬")
-    st.page_link("pages/crm.py", label="لوحة الإدارة", icon="📊")
-    
-    st.divider()
-    if st.button("تسجيل الخروج 🚪", use_container_width=True):
-        st.session_state["authenticated"] = False
-        st.rerun()
+if st.session_state.get("role") != "admin":
+    st.error("⛔ ليس لديك صلاحية الوصول إلى لوحة الإدارة.")
+    st.page_link("app.py", label="→ العودة للمساعد", icon="💬")
+    st.stop()
 
-st.markdown("<h2 class='rtl-text' style='color: #1e293b; margin-bottom: 20px;'>📊 لوحة مراقبة تذاكر المبيعات</h2>", unsafe_allow_html=True)
 
+# ── Sidebar (identical to app.py) ─────────────────────────────
+render_sidebar(active="crm")
+
+
+# ── Load tickets ──────────────────────────────────────────────
 try:
-    tickets = db_handler.get_all_leads()
-    if not tickets:
-        st.info("لا توجد تذاكر مسجلة حالياً.")
-    else:
-        total = len(tickets)
-        hot = sum(1 for l in tickets if str(l.get("lead_temperature", l.get("temperature", ""))).lower() == "hot")
-        warm = sum(1 for l in tickets if str(l.get("lead_temperature", l.get("temperature", ""))).lower() == "warm")
-        cold = sum(1 for l in tickets if str(l.get("lead_temperature", l.get("temperature", ""))).lower() == "cold")
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("إجمالي التذاكر 🗂️", total)
-        c2.metric("عملاء Hot 🔥", hot)
-        c3.metric("عملاء Warm ⭐", warm)
-        c4.metric("عملاء Cold ❄️", cold)
-        
-        st.write("---")
-        
-        col_chart, col_filter = st.columns([2, 1])
-        
-        with col_filter:
-            st.markdown("<h4 class='rtl-text'>🔍 تصفية العملاء</h4>", unsafe_allow_html=True)
-            filter_option = st.selectbox("اختر حالة العميل:", ["عرض الكل", "Hot 🔥", "Warm ⭐", "Cold ❄️"])
-            
-        with col_chart:
-            chart_data = {"حالة التذاكر": {"Hot": hot, "Warm": warm, "Cold": cold}}
-            st.bar_chart(chart_data, height=180, color="#3b82f6")
-            
-        st.write("---")
-
-        filtered_tickets = tickets
-        if filter_option != "عرض الكل":
-            target_temp = "hot" if "Hot" in filter_option else "warm" if "Warm" in filter_option else "cold"
-            filtered_tickets = [t for t in tickets if str(t.get("lead_temperature", t.get("temperature", ""))).lower() == target_temp]
-
-        st.markdown(f"<h4 class='rtl-text'>📋 قائمة التذاكر ({len(filtered_tickets)})</h4>", unsafe_allow_html=True)
-        
-        for lead in filtered_tickets:
-            temp = str(lead.get("lead_temperature", lead.get("temperature", "warm"))).lower()
-            
-            if temp == "hot":
-                badge_html = "<span class='badge-hot'>🔥 ساخن جداً (Hot)</span>"
-                icon = "🔴"
-            elif temp == "cold":
-                badge_html = "<span class='badge-cold'>❄️ بارد (Cold)</span>"
-                icon = "🔵"
-            else:
-                badge_html = "<span class='badge-warm'>⭐ مهتم (Warm)</span>"
-                icon = "🟡"
-            
-            name = lead.get("name", "غير محدد")
-            products = lead.get("interested_products", lead.get("products", "غير محدد"))
-            
-            with st.expander(f"{icon} {name} | المهتم بـ: {products}"):
-                st.markdown(f"<div class='rtl-text' style='margin-bottom: 20px;'>{badge_html} &nbsp;&nbsp;|&nbsp;&nbsp; 🕒 {lead.get('timestamp', '-')}</div>", unsafe_allow_html=True)
-                
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.markdown(f"<div class='rtl-text'><b>👤 الاسم:</b> {name}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rtl-text'><b>📱 رقم الهاتف:</b> {lead.get('phone', '-')}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rtl-text'><b>📍 المدينة:</b> {lead.get('location', lead.get('city', '-'))}</div>", unsafe_allow_html=True)
-                with col_b:
-                    st.markdown(f"<div class='rtl-text'><b>🎯 المنتجات:</b> {products}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rtl-text'><b>📈 المستوى:</b> {lead.get('current_level', lead.get('level', '-'))}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='rtl-text'><b>🚀 الهدف:</b> {lead.get('goal', '-')}</div>", unsafe_allow_html=True)
-                
-                st.divider()
-                st.info(f"📝 **ملخص المحادثة:**\n\n{lead.get('conversation_summary', lead.get('summary', '-'))}")
-                st.success(f"⚡ **الإجراء التالي:**\n\n{lead.get('next_action', 'التواصل مع العميل وتأكيد الحجز.')}")
-
+    all_tickets = db.get_all_leads() or []
 except Exception as e:
-    st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
+    st.error(f"خطأ في تحميل البيانات: {e}")
+    all_tickets = []
+
+
+# ── Helpers ───────────────────────────────────────────────────
+def _temp(t: dict) -> str:
+    return str(t.get("lead_temperature", t.get("temperature", "warm"))).lower()
+
+def _badge(temp: str) -> str:
+    cls = {"hot": "badge-hot", "cold": "badge-cold", "warm": "badge-warm"}.get(temp, "badge-warm")
+    emoji = {"hot": "🔥", "cold": "❄️", "warm": "⭐"}.get(temp, "⭐")
+    lbl   = {"hot": "Hot", "cold": "Cold", "warm": "Warm"}.get(temp, "Warm")
+    return f"<span class='{cls}'>{emoji} {lbl}</span>"
+
+def _dot(temp: str) -> str:
+    return {"hot": "🔴", "cold": "🔵", "warm": "🟡"}.get(temp, "🟡")
+
+
+# ── Page title ────────────────────────────────────────────────
+st.markdown(
+    "<h2 style='color:#fff; margin-bottom:18px; direction: rtl; text-align: right;'>📊 لوحة مراقبة تذاكر المبيعات</h2>",
+    unsafe_allow_html=True,
+)
+
+# ── KPI row ───────────────────────────────────────────────────
+total = len(all_tickets)
+hot   = sum(1 for t in all_tickets if _temp(t) == "hot")
+warm  = sum(1 for t in all_tickets if _temp(t) == "warm")
+cold  = sum(1 for t in all_tickets if _temp(t) == "cold")
+
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("إجمالي التذاكر 🗂️", total)
+k2.metric("Hot 🔥", hot)
+k3.metric("Warm ⭐", warm)
+k4.metric("Cold ❄️", cold)
+
+st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+if not all_tickets:
+    st.info("لا توجد تذاكر مسجلة حالياً.")
+    st.stop()
+
+# ── Filter dropdown ───────────────────────────────────────────
+fc, _ = st.columns([1, 3])
+with fc:
+    filt = st.selectbox(
+        "تصفية حسب درجة الحرارة",
+        ["الكل", "Hot 🔥", "Warm ⭐", "Cold ❄️"],
+        label_visibility="collapsed",
+    )
+
+filt_map = {"Hot 🔥": "hot", "Warm ⭐": "warm", "Cold ❄️": "cold"}
+tickets  = ([t for t in all_tickets if _temp(t) == filt_map[filt]]
+            if filt != "الكل" else all_tickets)
+
+st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+# ── Two-column: list (left) + detail/edit (right) ─────────────
+if "sel" not in st.session_state:
+    st.session_state["sel"] = 0
+if "edit" not in st.session_state:
+    st.session_state["edit"] = False
+
+list_col, detail_col = st.columns([1, 1.7], gap="large")
+
+# ── LEFT: ticket list ─────────────────────────────────────────
+with list_col:
+    st.markdown(
+        f"<p style='color:#777;font-size:.82rem;margin-bottom:10px;'>"
+        f"{len(tickets)} تذكرة</p>",
+        unsafe_allow_html=True,
+    )
+    for i, t in enumerate(tickets):
+        temp = _temp(t)
+        name = t.get("name", "غير محدد")
+        ts   = str(t.get("timestamp", ""))[:16]
+        prod = str(t.get("interested_products", ""))[:38]
+
+        if st.button(f"{_dot(temp)}  {name}", key=f"tb_{i}",
+                     use_container_width=True):
+            st.session_state["sel"]  = i
+            st.session_state["edit"] = False
+            st.rerun()
+
+        st.markdown(
+            f"<p style='font-size:.73rem;color:#555;margin:-10px 0 8px 6px;'>"
+            f"{ts}  ·  {prod}</p>",
+            unsafe_allow_html=True,
+        )
+
+# ── RIGHT: detail + edit ──────────────────────────────────────
+with detail_col:
+    if not tickets:
+        st.info("اختر تذكرة من القائمة")
+        st.stop()
+
+    idx = min(st.session_state["sel"], len(tickets) - 1)
+    t   = tickets[idx]
+    tmp = _temp(t)
+
+    # ── VIEW mode ─────────────────────────────────────────────
+    if not st.session_state["edit"]:
+        name = t.get("name", "—")
+        st.markdown(
+            # لاحظي الـ direction: rtl وتكبير الـ font-size لـ 1.7rem
+            f"<div style='display:flex;align-items:center;gap:14px;margin-bottom:24px; direction:rtl; justify-content:flex-start;'>"
+            f"<span style='font-size:1.7rem;font-weight:800;color:#fff;'>{name}</span>"
+            f"{_badge(tmp)}</div>",
+            unsafe_allow_html=True,
+        )
+
+        fields = [
+            ("📱 الهاتف / واتساب",  t.get("phone", "—")),
+            ("📧 البريد",           t.get("email") or "—"),
+            ("📍 المدينة",          t.get("location", t.get("city", "—"))),
+            ("🗣️ اللهجة",           t.get("language_dialect", "—")),
+            ("🎯 المنتجات",         str(t.get("interested_products", "—"))),
+            ("📈 المستوى",          t.get("current_level", t.get("level", "—"))),
+            ("🚀 الهدف",            t.get("goal", "—")),
+            ("⚠️ الاعتراضات",       t.get("objections") or "—"),
+            ("🕒 التاريخ",          str(t.get("timestamp", "—"))[:16]),
+        ]
+        rows = "".join(
+            f'<div class="detail-row">'
+            f'<span class="dl">{lbl}</span>'
+            f'<span class="dv">{val}</span>'
+            f'</div>'
+            for lbl, val in fields
+        )
+        st.markdown(f'<div class="detail-card">{rows}</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+        # ستلاحظين أن حجم الخط العربي هنا أصبح كبيراً ورائعاً بفضل الـ CSS الجديد
+        st.info(f"📝 **ملخص المحادثة:**\n\n{t.get('conversation_summary', t.get('summary','—'))}")
+        st.success(f"⚡ **الإجراء التالي:**\n\n{t.get('next_action','التواصل مع العميل.')}")
+
+        if st.button("✏️ تعديل التذكرة", key="edit_btn"):
+            st.session_state["edit"] = True
+            st.rerun()
+    # ── EDIT mode ─────────────────────────────────────────────
+    else:
+        st.markdown("<h4 style='color:#fff;margin-bottom:14px;'>✏️ تعديل التذكرة</h4>",
+                    unsafe_allow_html=True)
+        with st.form("ef"):
+            e_name  = st.text_input("الاسم",         value=t.get("name",""))
+            e_phone = st.text_input("الهاتف",        value=t.get("phone",""))
+            e_email = st.text_input("البريد",        value=t.get("email","") or "")
+            e_loc   = st.text_input("المدينة",       value=t.get("location", t.get("city","")))
+            e_prod  = st.text_input("المنتجات",      value=str(t.get("interested_products","")))
+            e_goal  = st.text_area ("الهدف",         value=t.get("goal",""), height=80)
+            temps   = ["Hot","Warm","Cold"]
+            cur_t   = tmp.capitalize() if tmp.capitalize() in temps else "Warm"
+            e_temp  = st.selectbox("درجة الحرارة",   temps,
+                                    index=temps.index(cur_t))
+            e_note  = st.text_area ("الإجراء التالي", value=t.get("next_action",""), height=80)
+
+            s1, s2 = st.columns(2)
+            save   = s1.form_submit_button("💾 حفظ", use_container_width=True)
+            cancel = s2.form_submit_button("❌ إلغاء", use_container_width=True)
+
+            if save:
+                updates = {k: v for k, v in {
+                    "name": e_name, "phone": e_phone, "email": e_email,
+                    "location": e_loc, "interested_products": e_prod,
+                    "goal": e_goal, "lead_temperature": e_temp,
+                    "next_action": e_note,
+                }.items() if v}
+                try:
+                    doc_id = t.get("_id")
+                    if doc_id:
+                        db.update_ticket(doc_id, updates)
+                        st.success("✅ تم الحفظ بنجاح!")
+                    else:
+                        st.warning("لم يتم العثور على معرف التذكرة.")
+                except Exception as ex:
+                    st.error(f"خطأ: {ex}")
+                st.session_state["edit"] = False
+                st.rerun()
+
+            if cancel:
+                st.session_state["edit"] = False
+                st.rerun()
