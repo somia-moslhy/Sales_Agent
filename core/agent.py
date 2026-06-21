@@ -12,7 +12,7 @@ from database.mongodb import MongoDBHandler
 load_dotenv()
 
 # =========================
-# Langfuse Observability (اختياري)
+# Langfuse Observability 
 # =========================
 if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
     try:
@@ -29,7 +29,7 @@ if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
 KAYFA_TURN_USAGE_LIMITS = UsageLimits(request_limit=3)
 
 # =========================
-# Pricing Files — مسارات ثابتة محسوبة مرة واحدة عند الـ import
+# Pricing Files 
 # =========================
 # نحسب المسار نسبةً لموقع هذا الملف (core/agent.py)، بغض النظر عن
 # شجرة الدليل الحالية عند تشغيل التطبيق (Streamlit / terminal / test).
@@ -40,16 +40,7 @@ _PRICING_FILES = {
 }
 
 def _load_pricing_context() -> str:
-    """
-    يقرأ ملفي الأسعار مرة واحدة ويعيد نصهما كسياق جاهز للحقن في نتيجة
-    search_kayfa. القراءة تحدث مرة واحدة عند أول استدعاء ثم تُخزَّن.
 
-    سبب الحل بهذه الطريقة وليس بأداة منفصلة:
-    - إضافة أداة جديدة = دورة LLM إضافية (tool-selection → tool-call → response)
-      وهو ما يتعارض صراحةً مع قيد "NO new tools" لتوفير RPM.
-    - الحقن المباشر في نتيجة search_kayfa يضمن وصول البيانات للموديل في
-      نفس الدورة الأولى دون أي request إضافي.
-    """
     parts = []
     for label, path in _PRICING_FILES.items():
         if path.exists():
@@ -107,23 +98,7 @@ class AgentDeps:
 # =========================
 # Agent
 # =========================
-# FIX 1 — max_tokens رُفع من 500 إلى 2000.
-#
-# السبب (مُؤكَّد من Langfuse):
-#   finish_reason = "length" عند 496 token، منها 479 token تفكير داخلي
-#   (thoughts). الموديل كان ينهي "التفكير" للتو ولم يبدأ بعد في استدعاء
-#   create_sales_ticket حين انقطع الرد. النتيجة: لا أداة تُنفَّذ، لا تذكرة
-#   CRM تُحفظ في MongoDB، وصفحة الـ CRM تبقى فارغة دائماً.
-#
-# لماذا 2000 وليس أقل؟
-#   الحد الأدنى الآمن =  thoughts (~500) + tool call JSON (~300) +
-#   رد المستخدم بالعربي (~400) + هامش (~300) = ~1500.
-#   2000 يضيف هامشاً كافياً لمحادثات أطول وردود أكثر تفصيلاً.
-#
-# لماذا ليس أعلى؟
-#   الحد الأعلى من max_tokens لا يعني الموديل سيستهلكه دائماً؛
-#   ردود البيع الطبيعية نادراً تتجاوز 600-800 token فعلياً.
-#   2000 يوازن بين منع الـ cut-off وعدم رفع سقف TPM بلا داعٍ.
+
 agent = Agent(
     model="google:gemini-2.5-flash",
     deps_type=AgentDeps,
@@ -197,25 +172,7 @@ def search_kayfa(ctx: RunContext[AgentDeps], query: str) -> str:
     # ------------------------------------------------------------------
     rag_result = ctx.deps.rag.search(query)
 
-    # ------------------------------------------------------------------
-    # FIX 2 — Price keyword detection + direct markdown injection
-    #
-    # المشكلة (مُؤكَّدة):
-    #   ChromaDB يفشل في استرجاع بيانات الأسعار لأن الـ embeddings تُخزَّن
-    #   للنصوص الطبيعية (فقرات)، وبيانات الأسعار موجودة في جداول markdown
-    #   (pipe-separated). المسافات والـ pipe characters تُشوّه vectors الجداول
-    #   مقارنةً بـ query الطبيعي ("سعر كورس Python")، فيعود ChromaDB بنتائج
-    #   ذات تشابه منخفض ويُفلتر كل شيء.
-    #
-    # الحل المختار (بدون أداة جديدة):
-    #   لو الـ query يحتوي كلمة سعر → نحقن نص الملفين كاملاً مباشرةً في
-    #   نتيجة search_kayfa. هذا يضمن وصول جميع الأسعار للموديل في نفس
-    #   الدورة، بصرف النظر عن جودة الـ RAG retrieval للجداول.
-    #
-    # لماذا لا نحقنهم دائماً؟
-    #   الملفان معاً ~300 token. حقنهما في كل استعلام يرفع baseline التوكنز
-    #   بشكل غير ضروري. نحقنهما فقط لما نتأكد إن السؤال عن سعر.
-    # ------------------------------------------------------------------
+
     pricing_section = ""
     if _is_price_query(query):
         pricing_context = _load_pricing_context()
