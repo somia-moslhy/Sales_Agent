@@ -16,8 +16,9 @@ def _b64(p: Path) -> str:
 _LOGO_B64 = _b64(_BASE / "kayfa_logo.png")
 LOGO_SRC  = f"data:image/png;base64,{_LOGO_B64}" if _LOGO_B64 else ""
 
-# chatbot avatar 
-_BOT_PATH = Path(r"D:\Somia_Files\Downloads\AI_Sales_Agent_fixed\AI_Sales_Agent\chatbot.png")
+# chatbot avatar (Dynamic path for both local and server)
+# chatbot avatar (Dynamic path for server)
+_BOT_PATH = _BASE / "chatbot.png"
 _BOT_B64  = _b64(_BOT_PATH) or _LOGO_B64
 BOT_SRC   = f"data:image/png;base64,{_BOT_B64}" if _BOT_B64 else LOGO_SRC
 
@@ -42,7 +43,7 @@ DARK_CSS = """
     --u-brd:       #2a4a8a;
 }
 
-/* 🚀 حل جذري للشريط الأبيض في الـ Light Mode */
+
 html, body, [data-testid="stApp"], [data-testid="stAppViewContainer"], 
 [data-testid="stHeader"], header[data-testid="stHeader"], section.main {
     background-color: var(--bg) !important;
@@ -117,9 +118,9 @@ p, span, label, div, h1, h2, h3, h4, li, td, th {
 .welcome-banner p  { color: #ccc !important; font-size: 1.0rem; margin: 8px 0 0; }
 
 /* ── Chat bubbles ─────────────────────────────── */
-.chat-wrap { display: flex; flex-direction: column; gap: 22px; padding: 4px 0 32px 0; }
+.chat-wrap { display: flex; flex-direction: column; gap: 40px; padding: 10px 0 40px 0; }
 
-.brow       { display: flex; align-items: flex-end; gap: 10px; max-width: 84%; }
+.brow       { display: flex; align-items: flex-end; gap: 15px; max-width: 84%; margin-bottom: 15px; }
 .brow.agent { margin-right: auto; }
 .brow.user  { margin-left: auto; flex-direction: row-reverse; }
 
@@ -262,7 +263,6 @@ def render_sidebar(active: str = "chat"):
     user_email = st.session_state.get("user_email", "")
     
     with st.sidebar:
-        # 🚀 لوجو ضخم جدا في السايد بار
         logo_html = (f'<img src="{LOGO_SRC}" style="width: 140px; border-radius: 16px; margin-bottom: 20px;">'
                      if LOGO_SRC else '<span style="font-size:32px;">🎓</span>')
         st.markdown(
@@ -271,7 +271,6 @@ def render_sidebar(active: str = "chat"):
             unsafe_allow_html=True,
         )
 
-        # 🚀 استخدام st.page_link بيمنع مسح الـ Session وبيحل مشكلة خروج الأدمن!
         st.page_link("app.py", label="💬 مساعد المبيعات", icon=None)
 
         if is_admin:

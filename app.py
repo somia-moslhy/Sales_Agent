@@ -268,8 +268,34 @@ def main():
 
                 reply = _small_talk(prompt)
                 if not reply:
-                    with st.spinner("جاري التفكير…"):
-                        reply = _run_agent(prompt, deps, sid)
+                    loading_placeholder = st.empty()
+                    custom_spinner = f"""
+                    <style>
+                    @keyframes pulse-logo {{
+                        0% {{ transform: scale(1); opacity: 1; }}
+                        50% {{ transform: scale(1.15); opacity: 0.6; }}
+                        100% {{ transform: scale(1); opacity: 1; }}
+                    }}
+                    .kayfa-thinking {{
+                        display: flex; align-items: center; gap: 12px; 
+                        direction: rtl; padding: 10px 5px; margin-bottom: 20px;
+                    }}
+                    .kayfa-thinking img {{
+                        width: 35px; height: 35px; border-radius: 50%;
+                        animation: pulse-logo 1.2s infinite ease-in-out;
+                    }}
+                    .kayfa-thinking span {{
+                        color: #4CAF50; font-size: 16px; font-weight: bold;
+                    }}
+                    </style>
+                    <div class="kayfa-thinking">
+                        <img src="{BOT_SRC}" alt="Thinking">
+                        <span>جاري التفكير...</span>
+                    </div>
+                    """
+                    loading_placeholder.markdown(custom_spinner, unsafe_allow_html=True)
+                    reply = _run_agent(prompt, deps, sid)
+                    loading_placeholder.empty()
 
                 if reply:
                     st.markdown(_bubble(reply, "agent"), unsafe_allow_html=True)
