@@ -12,7 +12,7 @@ from core.loader import DataLoader
 from core.rag import KayfaRAG
 from core.agent import agent, AgentDeps, KAYFA_TURN_USAGE_LIMITS
 from database.mongodb import MongoDBHandler
-from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded, UnexpectedModelBehavior
 
 load_dotenv()
 
@@ -46,7 +46,6 @@ def require_login() -> bool:
     if st.session_state.get("global_authenticated"):
         return True
 
-    # وسعنا المساحة في النص عشان اللوجو يكبر
     _, col, _ = st.columns([1, 1.5, 1])
     with col:
         if LOGO_SRC:
@@ -88,7 +87,7 @@ def require_login() -> bool:
                 except Exception:
                     pass
                 
-                # 🚀 الحل السحري للأدمن: التحويل يحصل هنا مرة واحدة بس!
+               
                 if role == "admin":
                     st.switch_page("pages/crm.py")
                 else:
@@ -136,11 +135,19 @@ def _small_talk(text: str) -> Optional[str]:
 
 # ── Agent call ────────────────────────────────────────────────
 def _run_agent(prompt: str, deps, sid: str) -> str:
+ 
+    request_deps = AgentDeps(
+        rag=deps.rag,
+        courses=deps.courses,
+        db_handler=deps.db_handler,
+        session_id=sid,
+    )
+
     for attempt in range(1, 4):
         try:
             result = agent.run_sync(
                 prompt,
-                deps=deps,
+                deps=request_deps,
                 message_history=st.session_state.get("pydantic_messages", []),
                 usage_limits=KAYFA_TURN_USAGE_LIMITS,
             )
@@ -154,6 +161,16 @@ def _run_agent(prompt: str, deps, sid: str) -> str:
                 time.sleep(20 * attempt if is_rate else 4 * attempt)
             else:
                 return "السيرفر مشغول، يرجى المحاولة لاحقاً."
+        except UnexpectedModelBehavior as e:
+           
+            error_text = str(e)
+            if "create_sales_ticket" in error_text or "رقم الهاتف" in error_text:
+                return (
+                    "في مشكلة صغيرة في رقم الهاتف اللي وصلني — مش متطابق مع "
+                    "المدينة/الدولة اللي ذكرتها. ممكن تأكدلي الرقم تاني (مع كود "
+                    "الدولة لو مختلف) عشان أقدر أسجّل بياناتك صح؟ 🙏"
+                )
+            return "حصلت مشكلة بسيطة في إكمال هذه الخطوة. ممكن تجرّب تصيغ طلبك بشكل مختلف؟ 🙏"
         except Exception as e:
             return f"عفواً، لم أتمكن من معالجة طلبك: {e}"
 
@@ -240,7 +257,6 @@ def main():
                 <p>اسألني عن أي كورس، مسار، أو دبلومة وسأرشدك للخيار الأنسب</p>
             </div>""", unsafe_allow_html=True)
 
-        # حاوية الشات الثابتة (Chat Container) - هذا هو حل الرسايل الطايرة
         chat_container = st.container()
         
         with chat_container:
@@ -256,13 +272,13 @@ def main():
         prompt = (st.chat_input("...اكتب استفسارك هنا") or st.session_state.pop("qr_pick", None))
         
         if prompt:
-            # 1. إضافة رسالة اليوزر
+           
             msgs.append({"sender": "user", "text": prompt})
             try:
                 db.save_chat_turn(sid, "user", prompt)
             except: pass
 
-            # 2. عرضها فورا في نفس الحاوية (فوق صندوق الإدخال)
+            
             with chat_container:
                 st.markdown(_bubble(prompt, "user"), unsafe_allow_html=True)
 
@@ -300,7 +316,7 @@ def main():
                 if reply:
                     st.markdown(_bubble(reply, "agent"), unsafe_allow_html=True)
 
-            # 3. حفظ الرد وتحديث الشاشة
+            
             if reply:
                 msgs.append({"sender": "assistant", "text": reply})
                 try:

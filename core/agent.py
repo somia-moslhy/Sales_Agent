@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.usage import UsageLimits
 import os
@@ -31,8 +31,7 @@ KAYFA_TURN_USAGE_LIMITS = UsageLimits(request_limit=3)
 # =========================
 # Pricing Files 
 # =========================
-# نحسب المسار نسبةً لموقع هذا الملف (core/agent.py)، بغض النظر عن
-# شجرة الدليل الحالية عند تشغيل التطبيق (Streamlit / terminal / test).
+
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _PRICING_FILES = {
     "individual": _DATA_DIR / "kayfa_paid_individual_courses.md",
@@ -47,10 +46,9 @@ def _load_pricing_context() -> str:
             try:
                 parts.append(f"--- {path.name} ---\n{path.read_text(encoding='utf-8')}")
             except Exception:
-                pass   # لو فشلت القراءة، نكمل بدونها بدل ما نوقف الأداة
+                pass   
     return "\n\n".join(parts)
 
-# كلمات مفتاحية تدل على سؤال عن سعر — عربي وإنجليزي
 _PRICE_KEYWORDS = {
     # عربي
     "سعر", "أسعار", "تكلفة", "تكاليف", "بكام", "بكم", "كام", "كم",
@@ -84,6 +82,40 @@ class CRMTicket(BaseModel):
     next_action: str      = Field(..., description="Recommended next action for the sales rep")
     timestamp: str        = Field(..., description="Ticket creation time — YYYY-MM-DD HH:MM format")
 
+    @model_validator(mode="after")
+    def validate_phone_matches_country(self) -> "CRMTicket":
+     
+        digits_only = "".join(ch for ch in self.phone if ch.isdigit())
+        location_lower = (self.location or "").lower()
+
+    
+        for cc, local_prefix in (("20", "0"), ("966", "0"), ("963", "0")):
+            if digits_only.startswith(cc) and len(digits_only) > len(cc) + 6:
+                digits_only = local_prefix + digits_only[len(cc):]
+                break
+
+        rules = [
+            ("egypt", "مصر", ("010", "011", "012", "015"), 11),
+            ("saudi", "السعودية", ("05",), 10),
+            ("syria", "سوريا", ("09",), 10),
+        ]
+
+        for key_en, key_ar, valid_prefixes, expected_len in rules:
+            if key_en in location_lower or key_ar in location_lower:
+                if not (
+                    digits_only.startswith(valid_prefixes)
+                    and len(digits_only) == expected_len
+                ):
+                    raise ValueError(
+                        f"رقم الهاتف '{self.phone}' غير منطقي لدولة '{self.location}': "
+                        f"المتوقع {expected_len} رقم محلي يبدأ بـ {'/'.join(valid_prefixes)}، "
+                        f"والرقم المُدخَل فيه {len(digits_only)} رقم. "
+                        "يرجى تأكيد الرقم مع المستخدم قبل حفظ التذكرة."
+                    )
+                break
+
+        return self
+
 
 # =========================
 # Dependencies
@@ -93,6 +125,8 @@ class AgentDeps:
     rag: object
     courses: List[dict]
     db_handler: "MongoDBHandler" = None
+  
+    session_id: str = ""
 
 
 # =========================
@@ -170,7 +204,11 @@ def search_kayfa(ctx: RunContext[AgentDeps], query: str) -> str:
     # ------------------------------------------------------------------
     # 2) Unstructured semantic lookup — policies, pitches, FAQs via RAG
     # ------------------------------------------------------------------
-    rag_result = ctx.deps.rag.search(query)
+    try:
+        rag_result = ctx.deps.rag.search(query)
+    except Exception as e:
+        print(f"⚠️ تجاهل خطأ اتصال بجوجل: {e}")
+        rag_result = "معلومات RAG غير متاحة حالياً بسبب مشكلة شبكة. اعتمد على البيانات الهيكلية (Structured Courses) فقط للرد."
 
 
     pricing_section = ""
@@ -186,11 +224,26 @@ def search_kayfa(ctx: RunContext[AgentDeps], query: str) -> str:
     )
 
 
-@agent.tool
+@agent.tool(retries=0)
 def create_sales_ticket(ctx: RunContext[AgentDeps], ticket: CRMTicket) -> str:
     """Create a CRM sales ticket and save the lead to MongoDB when the user provides contact details."""
+
     ticket_dict = ticket.model_dump()
     db_handler = ctx.deps.db_handler or MongoDBHandler()
+
+    transcript_text = ""
+    if ctx.deps.session_id:
+        try:
+            chat_turns = db_handler.get_chat_history(ctx.deps.session_id)
+            lines = [
+                f"{'العميل' if turn.get('sender') == 'user' else 'الوكيل'}: {turn.get('text', '')}"
+                for turn in chat_turns
+            ]
+            transcript_text = "\n".join(lines)
+        except Exception:
+            transcript_text = ""
+    ticket_dict["conversation_transcript"] = transcript_text
+
     inserted_id = db_handler.save_ticket(ticket_dict)
     return (
         f"CRM ticket created successfully and saved to database with ID: {inserted_id}. "

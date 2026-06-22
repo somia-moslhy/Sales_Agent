@@ -62,7 +62,7 @@ p, span, label, div, h1, h2, h3, h4, li, td, th {
     color: var(--txt) !important;
 }
 
-/* 🚀 تكبير اللوجو واسم كيفا في الـ Sidebar للضِعف */
+
 .sb-logo {
     display: flex; align-items: center; gap: 16px;
     padding: 10px 0 24px 0;
@@ -75,7 +75,7 @@ p, span, label, div, h1, h2, h3, h4, li, td, th {
     color: #ffffff !important; letter-spacing: .5px;
 }
 
-/* 🚀 تكبير القوائم (مساعد المبيعات ولوحة الإدارة) */
+
 .nav-item {
     display: flex; align-items: center; gap: 12px;
     padding: 16px 18px !important; border-radius: 12px; margin-bottom: 8px;
@@ -243,7 +243,7 @@ div[data-testid="stMetricLabel"] { color: var(--txt-m) !important; font-size: 1r
 .dl { color: var(--txt-m) !important; font-weight: bold; }
 .dv { color: var(--txt) !important; font-weight: 500; text-align: left; }
 
-/* 🚀 حل الـ RTL والخط الصغير في الملخص والإجراء التالي */
+
 div[data-testid="stAlert"] {
     direction: rtl !important;
     text-align: right !important;
@@ -285,5 +285,5 @@ def render_sidebar(active: str = "chat"):
             )
 
         if st.button("تسجيل الخروج 🚪", use_container_width=True):
-            st.session_state.clear() # نمسح الذاكرة بالكامل عند الخروج فقط
+            st.session_state.clear() 
             st.rerun()

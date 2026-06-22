@@ -51,6 +51,7 @@ render_sidebar(active="crm")
 # ── Load tickets ──────────────────────────────────────────────
 try:
     all_tickets = db.get_all_leads() or []
+    print("--- ALL TICKETS FROM DB ---", all_tickets) 
 except Exception as e:
     st.error(f"خطأ في تحميل البيانات: {e}")
     all_tickets = []
@@ -156,7 +157,6 @@ with detail_col:
     if not st.session_state["edit"]:
         name = t.get("name", "—")
         st.markdown(
-            # لاحظي الـ direction: rtl وتكبير الـ font-size لـ 1.7rem
             f"<div style='display:flex;align-items:center;gap:14px;margin-bottom:24px; direction:rtl; justify-content:flex-start;'>"
             f"<span style='font-size:1.7rem;font-weight:800;color:#fff;'>{name}</span>"
             f"{_badge(tmp)}</div>",
@@ -184,9 +184,15 @@ with detail_col:
         st.markdown(f'<div class="detail-card">{rows}</div>', unsafe_allow_html=True)
 
         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-        # ستلاحظين أن حجم الخط العربي هنا أصبح كبيراً ورائعاً بفضل الـ CSS الجديد
         st.info(f"📝 **ملخص المحادثة:**\n\n{t.get('conversation_summary', t.get('summary','—'))}")
         st.success(f"⚡ **الإجراء التالي:**\n\n{t.get('next_action','التواصل مع العميل.')}")
+
+        with st.expander("📝 عرض المحادثة الكاملة"):
+            st.markdown(
+                f"<div style='direction:rtl; text-align:right; white-space:pre-wrap;'>"
+                f"{t.get('conversation_transcript', '—')}</div>",
+                unsafe_allow_html=True,
+            )
 
         if st.button("✏️ تعديل التذكرة", key="edit_btn"):
             st.session_state["edit"] = True
