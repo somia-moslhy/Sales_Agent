@@ -62,7 +62,7 @@ p, span, label, div, h1, h2, h3, h4, li, td, th {
     color: var(--txt) !important;
 }
 
-
+/* 🚀 Enlarge Kayfa logo and name in the sidebar for better visibility */
 .sb-logo {
     display: flex; align-items: center; gap: 16px;
     padding: 10px 0 24px 0;
@@ -75,7 +75,7 @@ p, span, label, div, h1, h2, h3, h4, li, td, th {
     color: #ffffff !important; letter-spacing: .5px;
 }
 
-
+/* 🚀 Enlarge navigation items (Sales Assistant and Admin Dashboard) */
 .nav-item {
     display: flex; align-items: center; gap: 12px;
     padding: 16px 18px !important; border-radius: 12px; margin-bottom: 8px;
@@ -243,7 +243,7 @@ div[data-testid="stMetricLabel"] { color: var(--txt-m) !important; font-size: 1r
 .dl { color: var(--txt-m) !important; font-weight: bold; }
 .dv { color: var(--txt) !important; font-weight: 500; text-align: left; }
 
-
+/* 🚀 Fix RTL and small-font issues in the summary and next-action alerts */
 div[data-testid="stAlert"] {
     direction: rtl !important;
     text-align: right !important;
@@ -275,6 +275,7 @@ def render_sidebar(active: str = "chat"):
 
         if is_admin:
             st.page_link("pages/crm.py", label="📊 لوحة الإدارة", icon=None)
+            st.page_link("pages/monitor.py", label="📈 المراقبة والتكلفة", icon=None)
 
         st.divider()
 
@@ -285,5 +286,5 @@ def render_sidebar(active: str = "chat"):
             )
 
         if st.button("تسجيل الخروج 🚪", use_container_width=True):
-            st.session_state.clear() 
+            st.session_state.clear() # Clear the entire session state only on logout
             st.rerun()

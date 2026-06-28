@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from datetime import datetime
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-inject_css()   # ← exact same CSS as app.py
+inject_css()  
 
 
 # ── DB ────────────────────────────────────────────────────────
@@ -31,8 +32,6 @@ db = init_db()
 
 
 # ── Auth guard: MUST be logged in + admin role ────────────────
-# session_state is shared across pages in the same browser session,
-# so if the user logged in on app.py the keys are already present here.
 if not st.session_state.get("global_authenticated"):
     st.warning("يرجى تسجيل الدخول أولاً من الصفحة الرئيسية.")
     st.page_link("app.py", label="→ الذهاب لصفحة الدخول", icon="🔐")
@@ -51,7 +50,6 @@ render_sidebar(active="crm")
 # ── Load tickets ──────────────────────────────────────────────
 try:
     all_tickets = db.get_all_leads() or []
-    print("--- ALL TICKETS FROM DB ---", all_tickets) 
 except Exception as e:
     st.error(f"خطأ في تحميل البيانات: {e}")
     all_tickets = []
@@ -61,16 +59,92 @@ except Exception as e:
 def _temp(t: dict) -> str:
     return str(t.get("lead_temperature", t.get("temperature", "warm"))).lower()
 
-def _badge(temp: str) -> str:
-    cls = {"hot": "badge-hot", "cold": "badge-cold", "warm": "badge-warm"}.get(temp, "badge-warm")
-    emoji = {"hot": "🔥", "cold": "❄️", "warm": "⭐"}.get(temp, "⭐")
-    lbl   = {"hot": "Hot", "cold": "Cold", "warm": "Warm"}.get(temp, "Warm")
-    return f"<span class='{cls}'>{emoji} {lbl}</span>"
-
 def _dot(temp: str) -> str:
     return {"hot": "🔴", "cold": "🔵", "warm": "🟡"}.get(temp, "🟡")
+def render_ticket_card(ticket):
+    prods = ticket.get('interested_products', '—')
+    if isinstance(prods, list):
+        prods = "، ".join(prods)
+        
+    temp_val = _temp(ticket)
+    temp_color = "#ff4b4b" if temp_val == 'hot' else "#ffa421" if temp_val == 'warm' else "#1c83e1"
+    temp_text = temp_val.upper()
 
+    card_html = f"""
+<div style="direction: rtl; text-align: right; background-color: #1e1e27; border: 1px solid #333; border-radius: 10px; padding: 20px; margin-bottom: 20px; font-family: sans-serif; color: #eee;">
+    <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px;">
+        <span style="color: #aaa; font-size: 14px; background: #2b2b36; padding: 3px 8px; border-radius: 5px;">ID: {ticket.get('_id', '')}</span>
+        <span style="color: {temp_color}; font-weight: bold;">عميل محتمل • {temp_text}</span>
+    </div>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold; width: 25%;">الاسم</td>
+            <td style="padding: 10px;">{ticket.get('name', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">البريد الإلكتروني</td>
+            <td style="padding: 10px; direction: ltr; text-align: right;">{ticket.get('email', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">رقم التواصل</td>
+            <td style="padding: 10px; direction: ltr; text-align: right;">{ticket.get('phone', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">المدينة</td>
+            <td style="padding: 10px;">{ticket.get('location', ticket.get('city', '—'))}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">اللغة / اللهجة</td>
+            <td style="padding: 10px;">{ticket.get('language_dialect', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">المنتجات محل الاهتمام</td>
+            <td style="padding: 10px; direction: ltr; text-align: right;">{prods}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">الهدف</td>
+            <td style="padding: 10px;">{ticket.get('goal', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">المستوى الحالي</td>
+            <td style="padding: 10px;">{ticket.get('current_level', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">الاعتراضات</td>
+            <td style="padding: 10px;">{ticket.get('objections', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">ملخص المحادثة</td>
+            <td style="padding: 10px; line-height: 1.6;">{ticket.get('conversation_summary', '—')}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #333;">
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">الإجراء التالي</td>
+            <td style="padding: 10px;">{ticket.get('next_action', '—')}</td>
+        </tr>
+        <tr>
+            <td style="padding: 10px; color: #4DA8DA; font-weight: bold;">التاريخ</td>
+            <td style="padding: 10px; direction: ltr; text-align: right;">{str(ticket.get('timestamp', '—'))[:16]}</td>
+        </tr>
+    </table>
+</div>
+"""
+    st.markdown(card_html, unsafe_allow_html=True)
+    
+    raw_chat = ticket.get('conversation_transcript', 'لا توجد محادثة مسجلة.')
+    formatted_chat = raw_chat.replace(
+        "العميل:", "<br><br><span style='color:#ff4b4b; font-weight:bold; font-size:16px;'>👤 العميل:</span><br>"
+    ).replace(
+        "الوكيل:", "<br><br><span style='color:#00d4ff; font-weight:bold; font-size:16px;'>🤖 الوكيل:</span><br>"
+    )
 
+    with st.expander("💬 عرض المحادثة الكاملة"):
+        chat_html = f"""
+<div style='direction: rtl; text-align: right; line-height: 1.8; font-family: sans-serif; background-color: #1e1e27; padding: 20px; border-radius: 8px; border: 1px solid #333; color: #eee; margin-top: -15px;'>
+{formatted_chat}
+</div>
+"""
+        st.markdown(chat_html, unsafe_allow_html=True)
+        
 # ── Page title ────────────────────────────────────────────────
 st.markdown(
     "<h2 style='color:#fff; margin-bottom:18px; direction: rtl; text-align: right;'>📊 لوحة مراقبة تذاكر المبيعات</h2>",
@@ -118,30 +192,30 @@ if "edit" not in st.session_state:
 
 list_col, detail_col = st.columns([1, 1.7], gap="large")
 
-# ── LEFT: ticket list ─────────────────────────────────────────
+# ── LEFT: ticket list (with scroll container) ─────────────────
 with list_col:
     st.markdown(
         f"<p style='color:#777;font-size:.82rem;margin-bottom:10px;'>"
         f"{len(tickets)} تذكرة</p>",
         unsafe_allow_html=True,
     )
-    for i, t in enumerate(tickets):
-        temp = _temp(t)
-        name = t.get("name", "غير محدد")
-        ts   = str(t.get("timestamp", ""))[:16]
-        prod = str(t.get("interested_products", ""))[:38]
+    with st.container(height=600):
+        for i, t in enumerate(tickets):
+            temp = _temp(t)
+            name = t.get("name", "غير محدد")
+            ts   = str(t.get("timestamp", ""))[:16]
+            prod = str(t.get("interested_products", ""))[:38]
 
-        if st.button(f"{_dot(temp)}  {name}", key=f"tb_{i}",
-                     use_container_width=True):
-            st.session_state["sel"]  = i
-            st.session_state["edit"] = False
-            st.rerun()
+            if st.button(f"{_dot(temp)}  {name}", key=f"tb_{i}", use_container_width=True):
+                st.session_state["sel"]  = i
+                st.session_state["edit"] = False
+                st.rerun()
 
-        st.markdown(
-            f"<p style='font-size:.73rem;color:#555;margin:-10px 0 8px 6px;'>"
-            f"{ts}  ·  {prod}</p>",
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                f"<p style='font-size:.73rem;color:#555;margin:-10px 0 8px 6px;'>"
+                f"{ts}  ·  {prod}</p>",
+                unsafe_allow_html=True,
+            )
 
 # ── RIGHT: detail + edit ──────────────────────────────────────
 with detail_col:
@@ -155,48 +229,13 @@ with detail_col:
 
     # ── VIEW mode ─────────────────────────────────────────────
     if not st.session_state["edit"]:
-        name = t.get("name", "—")
-        st.markdown(
-            f"<div style='display:flex;align-items:center;gap:14px;margin-bottom:24px; direction:rtl; justify-content:flex-start;'>"
-            f"<span style='font-size:1.7rem;font-weight:800;color:#fff;'>{name}</span>"
-            f"{_badge(tmp)}</div>",
-            unsafe_allow_html=True,
-        )
-
-        fields = [
-            ("📱 الهاتف / واتساب",  t.get("phone", "—")),
-            ("📧 البريد",           t.get("email") or "—"),
-            ("📍 المدينة",          t.get("location", t.get("city", "—"))),
-            ("🗣️ اللهجة",           t.get("language_dialect", "—")),
-            ("🎯 المنتجات",         str(t.get("interested_products", "—"))),
-            ("📈 المستوى",          t.get("current_level", t.get("level", "—"))),
-            ("🚀 الهدف",            t.get("goal", "—")),
-            ("⚠️ الاعتراضات",       t.get("objections") or "—"),
-            ("🕒 التاريخ",          str(t.get("timestamp", "—"))[:16]),
-        ]
-        rows = "".join(
-            f'<div class="detail-row">'
-            f'<span class="dl">{lbl}</span>'
-            f'<span class="dv">{val}</span>'
-            f'</div>'
-            for lbl, val in fields
-        )
-        st.markdown(f'<div class="detail-card">{rows}</div>', unsafe_allow_html=True)
+        render_ticket_card(t)
 
         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-        st.info(f"📝 **ملخص المحادثة:**\n\n{t.get('conversation_summary', t.get('summary','—'))}")
-        st.success(f"⚡ **الإجراء التالي:**\n\n{t.get('next_action','التواصل مع العميل.')}")
-
-        with st.expander("📝 عرض المحادثة الكاملة"):
-            st.markdown(
-                f"<div style='direction:rtl; text-align:right; white-space:pre-wrap;'>"
-                f"{t.get('conversation_transcript', '—')}</div>",
-                unsafe_allow_html=True,
-            )
-
         if st.button("✏️ تعديل التذكرة", key="edit_btn"):
             st.session_state["edit"] = True
             st.rerun()
+            
     # ── EDIT mode ─────────────────────────────────────────────
     else:
         st.markdown("<h4 style='color:#fff;margin-bottom:14px;'>✏️ تعديل التذكرة</h4>",
@@ -206,12 +245,17 @@ with detail_col:
             e_phone = st.text_input("الهاتف",        value=t.get("phone",""))
             e_email = st.text_input("البريد",        value=t.get("email","") or "")
             e_loc   = st.text_input("المدينة",       value=t.get("location", t.get("city","")))
-            e_prod  = st.text_input("المنتجات",      value=str(t.get("interested_products","")))
+            
+            # --- Edit here: convert the list to plain text ---
+            raw_p = t.get("interested_products", "")
+            clean_p = "، ".join(raw_p) if isinstance(raw_p, list) else str(raw_p)
+            e_prod  = st.text_input("المنتجات",      value=clean_p)
+            # ------------------------------------------
+            
             e_goal  = st.text_area ("الهدف",         value=t.get("goal",""), height=80)
             temps   = ["Hot","Warm","Cold"]
             cur_t   = tmp.capitalize() if tmp.capitalize() in temps else "Warm"
-            e_temp  = st.selectbox("درجة الحرارة",   temps,
-                                    index=temps.index(cur_t))
+            e_temp  = st.selectbox("درجة الحرارة",   temps, index=temps.index(cur_t))
             e_note  = st.text_area ("الإجراء التالي", value=t.get("next_action",""), height=80)
 
             s1, s2 = st.columns(2)
