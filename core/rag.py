@@ -62,6 +62,7 @@ class KayfaRAG:
 
     def search(self, question):
         if question in self.query_cache:
+            self.last_query_tokens_estimate = 0  
             return self.query_cache[question]
 
         results = self.db.similarity_search(
@@ -69,7 +70,7 @@ class KayfaRAG:
             k=4
         )
 
-        context="\n\n".join(
+        context = "\n\n".join(
             r.page_content
             for r in results
         )
@@ -81,4 +82,6 @@ class KayfaRAG:
         except Exception:
             pass
 
+        self.last_query_tokens_estimate = max(1, len(question) // 4)
+    
         return context

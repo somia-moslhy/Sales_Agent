@@ -227,17 +227,20 @@ def search_kayfa(ctx: RunContext[AgentDeps], query: str) -> str:
         for c in structured_matches[:4]
     ]
 
-    # ------------------------------------------------------------------
+# ------------------------------------------------------------------
     # 2) Unstructured semantic lookup — policies, pitches, FAQs via RAG
     # ------------------------------------------------------------------
     rag_result = ctx.deps.rag.search(query)
 
+    query_tokens = getattr(ctx.deps.rag, "last_query_tokens_estimate", 0)
+    if not query_tokens or query_tokens == 0:
+        query_tokens = max(1, len(query) // 4)
 
     from datetime import datetime, timezone
     ctx.deps.embedding_calls.append({
         "model_name": "gemini-embedding-001",
         "provider_name": "google",
-        "input_tokens": getattr(ctx.deps.rag, "last_query_tokens_estimate", 0),
+        "input_tokens": query_tokens, 
         "timestamp": datetime.now(timezone.utc),
     })
 
