@@ -1,6 +1,6 @@
 # Kayfa AI Sales Agent
 
-**AI-Powered Sales Assistant | Data Science Internship Project**
+**AI-Powered Sales Assistant | AI and Analytics Internship Project**
 
 An intelligent AI sales agent developed for **Kayfa**, designed to engage with users, recommend personalized learning paths, and convert conversations into actionable sales leads.
 
